@@ -1,0 +1,73 @@
+# Builds hook.dylib (with Dobby) on GitHub's macOS runners, and an unsigned Brew.ipa if you add the GD IPA.
+# Put this file at .github/workflows/build.yml
+#
+# Repo layout it expects:
+#   src/hook.mm
+#   tools/build_ipa.py
+#   tools/inject.py
+#   Geometry-Dash.ipa        (optional; only if you want the workflow to also produce Brew.ipa)
+name: build-hook
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Dobby (hooking backend) -------------------------------------------------
+      - name: Fetch Dobby
+        run: git clone --depth 1 https://github.com/jmpews/Dobby.git third_party/Dobby
+
+      - name: Build Dobby (iOS arm64 static lib)
+        run: |
+          cmake -S third_party/Dobby -B third_party/Dobby/build \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDOBBY_GENERATE_SHARED=OFF \
+            -DDOBBY_BUILD_EXAMPLE=OFF \
+            -DDOBBY_BUILD_TEST=OFF
+          cmake --build third_party/Dobby/build --config Release -j4
+          find third_party/Dobby/build -name 'libdobby*.a'
+
+      # ---- hook.dylib --------------------------------------------------------------
+      - name: Build hook.dylib
+        run: |
+          mkdir -p build
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          DOBBY_LIB=$(find third_party/Dobby/build -name 'libdobby.a' | head -n 1)
+          echo "Using $DOBBY_LIB"
+          xcrun --sdk iphoneos clang++ \
+            -arch arm64 -isysroot "$SDK" -miphoneos-version-min=13.0 \
+            -std=c++17 -O2 -fobjc-arc \
+            -DBREW_USE_DOBBY -Ithird_party/Dobby/include \
+            -dynamiclib -install_name @executable_path/Frameworks/hook.dylib \
+            -framework Foundation -framework UIKit \
+            src/hook.mm "$DOBBY_LIB" -lc++ \
+            -o build/hook.dylib
+          file build/hook.dylib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hook.dylib
+          path: build/hook.dylib
+
+      # ---- Optional: unsigned Brew.ipa ---------------------------------------------
+      - name: Build Brew.ipa (only if Geometry-Dash.ipa is in the repo)
+        run: |
+          if [ -f Geometry-Dash.ipa ]; then
+            python3 tools/build_ipa.py Geometry-Dash.ipa build/hook.dylib out/Brew.ipa
+          else
+            echo "Geometry-Dash.ipa not found, skipping IPA build"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brew.ipa
+          path: out/Brew.ipa
+          if-no-files-found: ignore
