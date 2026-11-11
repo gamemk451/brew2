@@ -21,11 +21,16 @@ jobs:
       - name: Fetch Dobby
         run: git clone --depth 1 https://github.com/jmpews/Dobby.git third_party/Dobby
 
+      - name: Show Dobby's environment check (for debugging)
+        run: sed -n 1,80p third_party/Dobby/cmake/build_environment_check.cmake
+
       - name: Build Dobby (iOS arm64 static lib)
         run: |
           cmake -S third_party/Dobby -B third_party/Dobby/build \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DPLATFORM=OS64 \
+            -DARCHS=arm64 \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
